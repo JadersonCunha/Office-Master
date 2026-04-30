@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Global Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 1. User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      // Students can't list other students for now to preserve privacy
+      allow list: if false; 
+      
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      
+      allow update: if isOwner(userId) && isValidUser(incoming()) && (
+        // Action: Update Stats
+        (incoming().diff(existing()).affectedKeys().hasOnly(['xp', 'level', 'completedExercises', 'readTips', 'unlockedBadges', 'survivalManualUnlocked'])) ||
+        // Action: Update Profile
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL']))
+      ) && (
+        // Prevent role manipulation
+        incoming().role == existing().role
+      );
+
+      // Chat subcollection
+      match /chats/{chatId} {
+        allow read, write: if isOwner(userId) && isValidChat(incoming());
+      }
+    }
+
+    // 2. Turmas (Groups)
+    match /turmas/{turmaId} {
+      allow read: if isSignedIn() && (
+        incoming().instructorId == request.auth.uid || 
+        request.auth.uid in incoming().memberIds
+      );
+      allow create: if isSignedIn() && isValidTurma(incoming()) && incoming().instructorId == request.auth.uid;
+      allow update: if isSignedIn() && incoming().instructorId == request.auth.uid && isValidTurma(incoming());
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['xp', 'level', 'role']) &&
+             data.xp is number && data.xp >= 0 &&
+             data.level is number && data.level >= 1 &&
+             data.role in ['student', 'instructor'] &&
+             (data.get('displayName', '') is string && data.get('displayName', '').size() <= 100) &&
+             (data.get('email', '') is string && data.get('email', '').size() <= 100);
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasAll(['role', 'text', 'timestamp']) &&
+             data.role in ['user', 'assistant'] &&
+             data.text is string && data.text.size() <= 5000 &&
+             data.timestamp is string; // Or timestamp
+    }
+
+    function isValidTurma(data) {
+      return data.keys().hasAll(['name', 'instructorId', 'code']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.instructorId is string &&
+             data.code is string && data.code.size() <= 10 &&
+             (data.get('memberIds', []) is list && data.get('memberIds', []).size() <= 100);
+    }
+  }
+}

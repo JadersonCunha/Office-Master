@@ -1,0 +1,75 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user progress and metadata",
+      "type": "object",
+      "properties": {
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "completedExercises": { "type": "array", "items": { "type": "string" } },
+        "readTips": { "type": "array", "items": { "type": "string" } },
+        "unlockedBadges": { "type": "array", "items": { "type": "string" } },
+        "survivalManualUnlocked": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["student", "instructor"] },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "email": { "type": "string" }
+      },
+      "required": ["xp", "level", "role"]
+    },
+    "ChatSession": {
+      "title": "AI Chat Session",
+      "description": "Groups chat messages into sessions",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "Individual message in a session",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["role", "text"]
+    },
+    "Turma": {
+      "title": "Classroom Group",
+      "description": "Groups of students managed by an instructor",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "instructorId": { "type": "string" },
+        "memberIds": { "type": "array", "items": { "type": "string" } },
+        "code": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "instructorId", "code"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Main user document"
+    },
+    "/users/{userId}/chatSessions/{sessionId}": {
+      "schema": "ChatSession",
+      "description": "Chat sessions grouping"
+    },
+    "/users/{userId}/chatSessions/{sessionId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages within a session"
+    },
+    "/turmas/{turmaId}": {
+      "schema": "Turma",
+      "description": "Classroom information"
+    }
+  }
+}

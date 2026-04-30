@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Global Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 1. User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false; 
+      
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      
+      allow update: if isOwner(userId) && isValidUser(incoming()) && (
+        // Action: Update Stats
+        (incoming().diff(existing()).affectedKeys().hasOnly(['xp', 'level', 'completedExercises', 'readTips', 'unlockedBadges', 'survivalManualUnlocked'])) ||
+        // Action: Update Profile
+        (incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL']))
+      ) && (
+        // Prevent role manipulation after creation
+        incoming().role == existing().role
+      );
+
+      // AI Chat History
+      match /chatSessions/{sessionId} {
+        allow read, write: if isOwner(userId) && isValidChatSession(incoming());
+        
+        match /messages/{messageId} {
+          allow read: if isOwner(userId);
+          allow create: if isOwner(userId) && isValidChatMessage(incoming());
+          allow update, delete: if false;
+        }
+      }
+    }
+
+    // 2. Turmas (Groups)
+    match /turmas/{turmaId} {
+      allow get: if isSignedIn() && (
+        existing().instructorId == request.auth.uid || 
+        request.auth.uid in existing().memberIds
+      );
+      allow list: if isSignedIn() && (
+        resource.data.instructorId == request.auth.uid || 
+        request.auth.uid in resource.data.memberIds
+      );
+      
+      allow create: if isSignedIn() && isValidTurma(incoming()) && incoming().instructorId == request.auth.uid;
+      
+      allow update: if isSignedIn() && isValidTurma(incoming()) && (
+        // Action: Instructor updates name or code
+        (existing().instructorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasAll(['instructorId']) == false) ||
+        // Action: Student joins (via cloud function or specific update if allowed)
+        // For simplicity, let's allow instructor to manage members
+        (existing().instructorId == request.auth.uid)
+      );
+    }
+
+    // --- Validation Helpers ---
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['xp', 'level', 'role']) &&
+             data.xp is number && data.xp >= 0 &&
+             data.level is number && data.level >= 1 &&
+             data.role in ['student', 'instructor'] &&
+             (data.get('displayName', '') is string && data.get('displayName', '').size() <= 100) &&
+             (data.get('email', '') is string && data.get('email', '').size() <= 100) &&
+             (data.get('completedExercises', []) is list) &&
+             (data.get('unlockedBadges', []) is list);
+    }
+
+    function isValidChatSession(data) {
+      return data.keys().hasAll(['title']) &&
+             data.title is string && data.title.size() <= 200;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['role', 'text']) &&
+             data.role in ['user', 'assistant'] &&
+             data.text is string && data.text.size() <= 10000;
+    }
+
+    function isValidTurma(data) {
+      return data.keys().hasAll(['name', 'instructorId', 'code']) &&
+             data.name is string && data.name.size() <= 100 &&
+             data.instructorId is string &&
+             data.code is string && data.code.size() <= 20 &&
+             (data.get('memberIds', []) is list && data.get('memberIds', []).size() <= 200);
+    }
+  }
+}
